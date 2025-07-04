@@ -24,6 +24,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
@@ -164,6 +165,46 @@ func Push(ctx context.Context, client *containerd.Client, rawRef string, options
 		dOpts = append(dOpts, dockerconfigresolver.WithSkipVerifyCerts(true))
 	}
 	dOpts = append(dOpts, dockerconfigresolver.WithHostsDirs(options.GOptions.HostsDir))
+
+	// Configure connection limits to prevent registry overload (503 errors)
+	if options.MaxConnsPerHost > 0 {
+		dOpts = append(dOpts, dockerconfigresolver.WithMaxConnsPerHost(options.MaxConnsPerHost))
+	}
+	if options.MaxIdleConns > 0 {
+		dOpts = append(dOpts, dockerconfigresolver.WithMaxIdleConns(options.MaxIdleConns))
+	}
+	if options.RequestTimeout > 0 {
+		dOpts = append(dOpts, dockerconfigresolver.WithRequestTimeout(time.Duration(options.RequestTimeout)*time.Second))
+	}
+	if options.MaxRetries > 0 {
+		dOpts = append(dOpts, dockerconfigresolver.WithMaxRetries(options.MaxRetries))
+	}
+	if options.RetryInitialDelay > 0 {
+		dOpts = append(dOpts, dockerconfigresolver.WithRetryInitialDelay(time.Duration(options.RetryInitialDelay)*time.Millisecond))
+	}
+	// Use the local push tracker for this operation
+	dOpts = append(dOpts, dockerconfigresolver.WithTracker(pushTracker))
+
+	if options.GOptions.InsecureRegistry {
+		log.G(ctx).WithError(err).Warnf("server %q does not seem to support HTTPS, falling back to plain HTTP", refDomain)
+		dOpts = append(dOpts, dockerconfigresolver.WithPlainHTTP(true))
+		// Apply same connection limits for HTTP fallback
+		if options.MaxConnsPerHost > 0 {
+			dOpts = append(dOpts, dockerconfigresolver.WithMaxConnsPerHost(options.MaxConnsPerHost))
+		}
+		if options.MaxIdleConns > 0 {
+			dOpts = append(dOpts, dockerconfigresolver.WithMaxIdleConns(options.MaxIdleConns))
+		}
+		if options.RequestTimeout > 0 {
+			dOpts = append(dOpts, dockerconfigresolver.WithRequestTimeout(time.Duration(options.RequestTimeout)*time.Second))
+		}
+		if options.MaxRetries > 0 {
+			dOpts = append(dOpts, dockerconfigresolver.WithMaxRetries(options.MaxRetries))
+		}
+		if options.RetryInitialDelay > 0 {
+			dOpts = append(dOpts, dockerconfigresolver.WithRetryInitialDelay(time.Duration(options.RetryInitialDelay)*time.Millisecond))
+		}
+	}
 
 	ho, err := dockerconfigresolver.NewHostOptions(ctx, refDomain, dOpts...)
 	if err != nil {
